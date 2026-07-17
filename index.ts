@@ -36,30 +36,6 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  pi.on("user_bash", (_event, _ctx) => {
-    if (!vm) throw new Error("VM not available");
-
-    return {
-      operations: {
-        async exec(command, cwd, { onData, signal, env }) {
-          const proc = vm!.exec(command, {
-            cwd,
-            env: envToVm(env),
-            signal,
-            stdout: "pipe",
-            stderr: "pipe",
-          });
-
-          for await (const chunk of proc.output()) {
-            onData(chunk.data);
-          }
-
-          return { exitCode: (await proc).exitCode };
-        },
-      },
-    };
-  });
-
   pi.registerTool({
     ...createReadTool(localCwd),
     async execute(id, params, signal, onUpdate, _ctx) {
