@@ -10,8 +10,8 @@ import {
 import { VM, RealFSProvider, createHttpHooks } from "@earendil-works/gondolin";
 
 export default function (pi: ExtensionAPI) {
-  const localCwd = process.cwd();
   let vm: VM | null = null;
+  const cwd = process.cwd();
 
   pi.on("session_start", async (_event, _ctx) => {
     const { httpHooks, env } = createHttpHooks({
@@ -19,14 +19,10 @@ export default function (pi: ExtensionAPI) {
     });
 
     const vfs = {
-      mounts: { [localCwd]: new RealFSProvider(localCwd) },
+      mounts: { [cwd]: new RealFSProvider(cwd) },
     };
 
-    vm = await VM.create({
-      httpHooks,
-      env,
-      vfs,
-    });
+    vm = await VM.create({ httpHooks, env, vfs });
   });
 
   pi.on("session_shutdown", async (_event, _ctx) => {
@@ -37,11 +33,11 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    ...createReadTool(localCwd),
+    ...createReadTool(cwd),
     async execute(id, params, signal, onUpdate, _ctx) {
-      if (!vm) throw new Error("VM not available");
+      if (!vm) throw new Error("vm not available");
 
-      const tool = createReadTool(localCwd, {
+      const tool = createReadTool(cwd, {
         operations: {
           readFile: async (p) => {
             return await vm!.fs.readFile(p);
@@ -57,11 +53,11 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    ...createWriteTool(localCwd),
+    ...createWriteTool(cwd),
     async execute(id, params, signal, onUpdate, _ctx) {
-      if (!vm) throw new Error("VM not available");
+      if (!vm) throw new Error("vm not available");
 
-      const tool = createWriteTool(localCwd, {
+      const tool = createWriteTool(cwd, {
         operations: {
           writeFile: async (p, content) => {
             await vm!.fs.writeFile(p, content);
@@ -79,11 +75,11 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    ...createEditTool(localCwd),
+    ...createEditTool(cwd),
     async execute(id, params, signal, onUpdate, _ctx) {
-      if (!vm) throw new Error("VM not available");
+      if (!vm) throw new Error("vm not available");
 
-      const tool = createEditTool(localCwd, {
+      const tool = createEditTool(cwd, {
         operations: {
           readFile: async (p) => {
             return await vm!.fs.readFile(p);
@@ -102,25 +98,28 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerTool({
-    ...createBashTool(localCwd),
+    ...createBashTool(cwd),
     async execute(id, params, signal, onUpdate, _ctx) {
-      if (!vm) throw new Error("VM not available");
+      if (!vm) throw new Error("vm not available");
 
-      const tool = createBashTool(localCwd, {
+      const tool = createBashTool(cwd, {
         operations: {
-          exec: async (command, cwd, { onData, signal: execSignal, env }) => {
+          exec: async (command, cwd, { onData, signal: signal, env }) => {
+            if (!env) throw new Error("env not available");
+
             const proc = vm!.exec(command, {
               cwd,
-              signal: execSignal,
-              env: envToVm(env),
+              signal,
+              env: envRecord(env),
               stdout: "pipe",
               stderr: "pipe",
             });
+
             for await (const chunk of proc.output()) {
               onData(chunk.data);
             }
-            const result = await proc;
-            return { exitCode: result.exitCode };
+
+            return { exitCode: (await proc).exitCode };
           },
         },
       });
@@ -129,13 +128,15 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // --- helpers ---
+  function envRecord(env: NodeJS.ProcessEnv): Record<string, string> {
+    const result: Record<string, string> = {};
 
-  function envToVm(env?: NodeJS.ProcessEnv) {
-    if (!env) return undefined;
+    for (const [key, value] of Object.entries(env)) {
+      if (value !== undefined) {
+        result[key] = value;
+      }
+    }
 
-    return Object.entries(env)
-      .filter(([, v]) => v !== undefined)
-      .flatMap(([k, v]) => [`${k}=${v}`]);
+    return result;
   }
 }
